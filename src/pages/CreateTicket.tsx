@@ -5,8 +5,14 @@ import { useTickets } from '@/context/TicketContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue
+} from '@/components/ui/select';
+import {
+  Card, CardContent, CardDescription,
+  CardHeader, CardTitle
+} from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ArrowLeft, Send } from 'lucide-react';
@@ -19,6 +25,7 @@ const CreateTicket = () => {
   const [priority, setPriority] = useState('medium');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
   const { user } = useAuth();
   const { createTicket, categories } = useTickets();
   const { toast } = useToast();
@@ -45,25 +52,36 @@ const CreateTicket = () => {
 
     setLoading(true);
 
-    // Create the ticket
-    setTimeout(() => {
-      createTicket({
+    try {
+      await createTicket({
         title,
         description,
         category,
         priority: priority as 'low' | 'medium' | 'high',
         status: 'open',
-        createdBy: user!.uid
+        createdBy: user!.uid,
+        createdAt: Date.now(),
+        replies: [],
+        votes: 0,
+        votedBy: [],
+        assignedTo: null,
       });
-      
+
       toast({
         title: "Ticket created successfully!",
-        description: "Your support ticket has been submitted and our team will respond soon.",
+        description: "Your support ticket has been submitted.",
       });
-      
-      setLoading(false);
+
       navigate('/dashboard');
-    }, 1000);
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to create ticket. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -84,7 +102,7 @@ const CreateTicket = () => {
           <CardHeader>
             <CardTitle>Create New Ticket</CardTitle>
             <CardDescription>
-              Describe your issue or question in detail so our support team can help you better.
+              Describe your issue or question in detail.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -108,11 +126,18 @@ const CreateTicket = () => {
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.name} value={cat.name}>
-                        {cat.name}
+                    {categories
+                      .filter(cat => cat.name && cat.name.trim() !== '')
+                      .map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    {categories.filter(cat => cat.name && cat.name.trim() !== '').length === 0 && (
+                      <SelectItem value="general" key="fallback">
+                        General Inquiry
                       </SelectItem>
-                    ))}
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -135,7 +160,7 @@ const CreateTicket = () => {
                 <Label htmlFor="description">Description *</Label>
                 <Textarea
                   id="description"
-                  placeholder="Provide detailed information about your issue..."
+                  placeholder="Detailed description of the issue..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={6}

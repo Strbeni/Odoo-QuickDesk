@@ -1,10 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
+import { auth, db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 export interface User {
   uid: string;
   name: string;
   email: string;
-  role: 'end_user' | 'support_agent' | 'admin';
+  role?: 'end_user' | 'support_agent' | 'admin'; // You may want to fetch this from Firestore
 }
 
 interface AuthContextType {
@@ -16,44 +19,60 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Dummy users for demonstration
-const dummyUsers: User[] = [
-  { uid: '1', name: 'John Doe', email: 'user@example.com', role: 'end_user' },
-  { uid: '2', name: 'Agent Smith', email: 'agent@example.com', role: 'support_agent' },
-  { uid: '3', name: 'Admin User', email: 'admin@example.com', role: 'admin' },
-];
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate checking for existing session
-    const savedUser = localStorage.getItem('quickdesk_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          // Fetch additional user info (like role) from Firestore
+          const userDocRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          let role: 'end_user' | 'support_agent' | 'admin' = 'end_user';
+          let name = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            role = userData.role || 'end_user';
+            name = userData.name || name;
+          }
+          
+          setUser({
+            uid: firebaseUser.uid,
+            name,
+            email: firebaseUser.email || "",
+            role,
+          });
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          // Set default user data if Firestore fetch fails
+          setUser({
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            email: firebaseUser.email || "",
+            role: 'end_user',
+          });
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   const login = async (email: string, password: string) => {
     setLoading(true);
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const foundUser = dummyUsers.find(u => u.email === email);
-    if (foundUser && password === 'password') {
-      setUser(foundUser);
-      localStorage.setItem('quickdesk_user', JSON.stringify(foundUser));
-    } else {
-      throw new Error('Invalid credentials');
-    }
+    await signInWithEmailAndPassword(auth, email, password);
     setLoading(false);
   };
 
   const logout = () => {
+    signOut(auth);
     setUser(null);
-    localStorage.removeItem('quickdesk_user');
   };
 
   return (

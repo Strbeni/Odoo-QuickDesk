@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTickets } from '@/context/TicketContext';
 import { Button } from '@/components/ui/button';
@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Plus, MessageSquare, User, LogOut, Settings, ArrowUp } from 'lucide-react';
+import { Search, Plus, MessageSquare, User, LogOut, Settings, ArrowUp, Loader2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { initializeSampleData } from '@/utils/initializeData';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -16,6 +17,28 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [assignmentFilter, setAssignmentFilter] = useState('all');
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  // Initialize sample data on first load if no tickets exist
+  useEffect(() => {
+    const initializeIfEmpty = async () => {
+      if (tickets.length === 0 && !isInitializing) {
+        setIsInitializing(true);
+        try {
+          await initializeSampleData();
+        } catch (error) {
+          console.error('Failed to initialize sample data:', error);
+        } finally {
+          setIsInitializing(false);
+        }
+      }
+    };
+
+    // Only run after a short delay to ensure tickets have been loaded
+    const timer = setTimeout(initializeIfEmpty, 2000);
+    return () => clearTimeout(timer);
+  }, [tickets.length, isInitializing]);
 
   const handleLogout = () => {
     logout();
@@ -33,20 +56,34 @@ const Dashboard = () => {
   };
 
   const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch = ticket.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         ticket.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = ticket.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         ticket.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
-    const matchesCategory = categoryFilter === 'all' || ticket.category.toLowerCase() === categoryFilter;
+    const matchesCategory = categoryFilter === 'all' || (ticket.category && ticket.category.toLowerCase() === categoryFilter);
+    
+    // Assignment filtering for agents and admins
+    let matchesAssignment = true;
+    if (user?.role === 'support_agent' || user?.role === 'admin') {
+      if (assignmentFilter === 'assigned_to_me') {
+        matchesAssignment = ticket.assignedTo === user.uid;
+      } else if (assignmentFilter === 'unassigned') {
+        matchesAssignment = !ticket.assignedTo;
+      } else if (assignmentFilter === 'assigned') {
+        matchesAssignment = !!ticket.assignedTo;
+      }
+      // 'all' shows all tickets for agents/admins
+    }
     
     // Role-based filtering
     if (user?.role === 'end_user') {
       return matchesSearch && matchesStatus && matchesCategory && ticket.createdBy === user.uid;
     }
     
-    return matchesSearch && matchesStatus && matchesCategory;
+    // Agents and admins see all tickets (filtered by assignment if specified)
+    return matchesSearch && matchesStatus && matchesCategory && matchesAssignment;
   });
 
-  const uniqueCategories = [...new Set(tickets.map(ticket => ticket.category))];
+  const uniqueCategories = [...new Set(tickets.map(ticket => ticket.category).filter(category => category && typeof category === 'string'))];
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,6 +147,19 @@ const Dashboard = () => {
               ))}
             </SelectContent>
           </Select>
+          {(user?.role === 'support_agent' || user?.role === 'admin') && (
+            <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
+              <SelectTrigger className="w-full sm:w-48">
+                <SelectValue placeholder="Filter by assignment" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Tickets</SelectItem>
+                <SelectItem value="assigned_to_me">Assigned to Me</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                <SelectItem value="assigned">Assigned to Others</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Link to="/create-ticket">
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -140,7 +190,7 @@ const Dashboard = () => {
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground">
-                      {ticket.createdAt.toLocaleDateString()}
+                      {ticket.createdAt ? ticket.createdAt.toLocaleDateString() : 'Unknown date'}
                     </span>
                   </div>
                   <CardTitle className="text-lg line-clamp-2">{ticket.title}</CardTitle>
@@ -150,16 +200,16 @@ const Dashboard = () => {
                     {ticket.description}
                   </CardDescription>
                   <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <Badge variant="outline">{ticket.category}</Badge>
+                    <Badge variant="outline">{ticket.category || 'Uncategorized'}</Badge>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1">
                         <MessageSquare className="h-4 w-4" />
-                        {ticket.replies.length}
+                        {ticket.replies?.length || 0}
                       </div>
                       {user?.role === 'end_user' && (
                         <div className="flex items-center gap-1">
                           <ArrowUp className="h-4 w-4" />
-                          {ticket.votes}
+                          {ticket.votes || 0}
                         </div>
                       )}
                     </div>
@@ -170,9 +220,22 @@ const Dashboard = () => {
           ))}
         </div>
 
-        {filteredTickets.length === 0 && (
+        {isInitializing && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No tickets found</p>
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Initializing dashboard data...</p>
+          </div>
+        )}
+
+        {!isInitializing && filteredTickets.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground mb-4">No tickets found</p>
+            <Link to="/create-ticket">
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Your First Ticket
+              </Button>
+            </Link>
           </div>
         )}
       </div>

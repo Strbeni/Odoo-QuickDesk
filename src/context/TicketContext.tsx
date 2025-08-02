@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { collection, addDoc, updateDoc, doc, getDocs, getDoc, deleteDoc, onSnapshot, arrayUnion, arrayRemove, setDoc } from "firebase/firestore";
+import { db } from '../firebase';
 
 export interface Ticket {
   id: string;
@@ -31,123 +33,150 @@ export interface Category {
   description?: string;
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  role: 'end_user' | 'support_agent' | 'admin';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 interface TicketContextType {
   tickets: Ticket[];
   categories: Category[];
-  createTicket: (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => void;
-  updateTicket: (id: string, updates: Partial<Ticket>) => void;
-  addReply: (ticketId: string, message: string) => void;
-  voteTicket: (ticketId: string, userId: string) => void;
+  users: UserProfile[];
+  createTicket: (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => Promise<void>;
+  updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
+  addReply: (ticketId: string, message: string) => Promise<void>;
+  voteTicket: (ticketId: string, userId: string) => Promise<void>;
   getTicketById: (id: string) => Ticket | undefined;
-  createCategory: (category: Omit<Category, 'id'>) => void;
-  updateCategory: (id: string, updates: Partial<Category>) => void;
-  deleteCategory: (id: string) => void;
+  createCategory: (category: Omit<Category, 'id'>) => Promise<void>;
+  updateCategory: (id: string, updates: Partial<Category>) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  updateUserRole: (userId: string, role: 'end_user' | 'support_agent' | 'admin') => Promise<void>;
+  assignTicket: (ticketId: string, agentId: string) => Promise<void>;
 }
 
 const TicketContext = createContext<TicketContextType | undefined>(undefined);
 
-// Default categories
-const defaultCategories: Category[] = [
-  { id: '1', name: 'Technical', description: 'Technical issues and bugs' },
-  { id: '2', name: 'Account', description: 'Account related questions' },
-  { id: '3', name: 'Billing', description: 'Billing and payment issues' },
-  { id: '4', name: 'Feature Request', description: 'New feature requests' },
-  { id: '5', name: 'Other', description: 'Other questions and issues' },
-];
-
-// Dummy tickets for demonstration
-const dummyTickets: Ticket[] = [
-  {
-    id: '1',
-    title: 'Login issues with mobile app',
-    description: 'Cannot log in to the mobile application using my credentials. The app keeps showing "Invalid credentials" even though I\'m sure the email and password are correct.',
-    status: 'open',
-    category: 'Technical',
-    priority: 'high',
-    createdBy: '1',
-    createdAt: new Date('2024-01-15'),
-    updatedAt: new Date('2024-01-15'),
-    replies: [
-      {
-        id: '1',
-        message: 'Hi! I\'m looking into this issue. Can you tell me which device you\'re using?',
-        authorId: '2',
-        authorName: 'Agent Smith',
-        timestamp: new Date('2024-01-15T10:30:00')
-      }
-    ],
-    votes: 3,
-    votedBy: ['4', '5', '6']
-  },
-  {
-    id: '2',
-    title: 'Password reset not working',
-    description: 'I requested a password reset email but haven\'t received it yet. Checked spam folder as well.',
-    status: 'in_progress',
-    category: 'Account',
-    priority: 'medium',
-    createdBy: '1',
-    assignedTo: '2',
-    createdAt: new Date('2024-01-14'),
-    updatedAt: new Date('2024-01-14'),
-    replies: [],
-    votes: 1,
-    votedBy: ['7']
-  },
-  {
-    id: '3',
-    title: 'Billing question about subscription',
-    description: 'Need clarification on billing cycle and when the next payment will be charged.',
-    status: 'resolved',
-    category: 'Billing',
-    priority: 'low',
-    createdBy: '1',
-    assignedTo: '2',
-    createdAt: new Date('2024-01-13'),
-    updatedAt: new Date('2024-01-13'),
-    replies: [
-      {
-        id: '2',
-        message: 'Your billing cycle is monthly, and the next payment will be on January 28th.',
-        authorId: '2',
-        authorName: 'Agent Smith',
-        timestamp: new Date('2024-01-13T14:20:00')
-      }
-    ],
-    votes: 5,
-    votedBy: ['8', '9', '10', '11', '12']
-  }
-];
-
 export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tickets, setTickets] = useState<Ticket[]>(dummyTickets);
-  const [categories, setCategories] = useState<Category[]>(defaultCategories);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const { user } = useAuth();
 
-  const createTicket = (ticketData: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => {
-    const newTicket: Ticket = {
+  // Listen for tickets
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "tickets"), 
+      async (snapshot) => {
+        try {
+          const ticketData = await Promise.all(snapshot.docs.map(async docSnap => {
+            const data = docSnap.data();
+            // Convert Firestore timestamps to JS Date
+            return {
+              ...data,
+              id: docSnap.id,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+              updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+              replies: (data.replies || []).map((r: any) => ({
+                ...r,
+                timestamp: r.timestamp?.toDate ? r.timestamp.toDate() : new Date()
+              }))
+            } as Ticket;
+          }));
+          setTickets(ticketData);
+        } catch (error) {
+          console.error('Error fetching tickets:', error);
+          setTickets([]);
+        }
+      },
+      (error) => {
+        console.error('Error listening to tickets:', error);
+        setTickets([]);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  // Listen for categories
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "categories"), 
+      (snapshot) => {
+        try {
+          setCategories(snapshot.docs.map(docSnap => ({
+            id: docSnap.id,
+            ...docSnap.data()
+          } as Category)));
+        } catch (error) {
+          console.error('Error fetching categories:', error);
+          setCategories([]);
+        }
+      },
+      (error) => {
+        console.error('Error listening to categories:', error);
+        setCategories([]);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  // Listen for users (admin only)
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    
+    const unsub = onSnapshot(
+      collection(db, "users"), 
+      (snapshot) => {
+        try {
+          const userData = snapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+              updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+            } as UserProfile;
+          });
+          setUsers(userData);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+          setUsers([]);
+        }
+      },
+      (error) => {
+        console.error('Error listening to users:', error);
+        setUsers([]);
+      }
+    );
+    return () => unsub();
+  }, [user?.role]);
+
+  const createTicket = async (ticketData: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => {
+    await addDoc(collection(db, "tickets"), {
       ...ticketData,
-      id: (tickets.length + 1).toString(),
       createdAt: new Date(),
       updatedAt: new Date(),
       replies: [],
       votes: 0,
       votedBy: []
-    };
-    setTickets(prev => [newTicket, ...prev]);
+    });
   };
 
-  const updateTicket = (id: string, updates: Partial<Ticket>) => {
-    setTickets(prev => prev.map(ticket => 
-      ticket.id === id 
-        ? { ...ticket, ...updates, updatedAt: new Date() }
-        : ticket
-    ));
+  const updateTicket = async (id: string, updates: Partial<Ticket>) => {
+    await updateDoc(doc(db, "tickets", id), {
+      ...updates,
+      updatedAt: new Date()
+    });
   };
 
-  const addReply = (ticketId: string, message: string) => {
+  const addReply = async (ticketId: string, message: string) => {
     if (!user) return;
-    
+    const ticketRef = doc(db, "tickets", ticketId);
+    const ticketSnap = await getDoc(ticketRef);
+    const ticket = ticketSnap.data();
     const newReply: Reply = {
       id: Date.now().toString(),
       message,
@@ -155,66 +184,58 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       authorName: user.name,
       timestamp: new Date()
     };
-
-    setTickets(prev => prev.map(ticket => 
-      ticket.id === ticketId
-        ? { 
-            ...ticket, 
-            replies: [...ticket.replies, newReply],
-            updatedAt: new Date()
-          }
-        : ticket
-    ));
+    await updateDoc(ticketRef, {
+      replies: arrayUnion(newReply),
+      updatedAt: new Date()
+    });
   };
 
-  const voteTicket = (ticketId: string, userId: string) => {
-    setTickets(prev => prev.map(ticket => {
-      if (ticket.id === ticketId) {
-        const hasVoted = ticket.votedBy.includes(userId);
-        if (hasVoted) {
-          return {
-            ...ticket,
-            votes: ticket.votes - 1,
-            votedBy: ticket.votedBy.filter(id => id !== userId)
-          };
-        } else {
-          return {
-            ...ticket,
-            votes: ticket.votes + 1,
-            votedBy: [...ticket.votedBy, userId]
-          };
-        }
-      }
-      return ticket;
-    }));
+  const voteTicket = async (ticketId: string, userId: string) => {
+    const ticketRef = doc(db, "tickets", ticketId);
+    const ticketSnap = await getDoc(ticketRef);
+    const ticket = ticketSnap.data();
+    const hasVoted = ticket?.votedBy?.includes(userId);
+    await updateDoc(ticketRef, {
+      votes: hasVoted ? ticket.votes - 1 : ticket.votes + 1,
+      votedBy: hasVoted ? arrayRemove(userId) : arrayUnion(userId)
+    });
   };
 
   const getTicketById = (id: string) => {
     return tickets.find(ticket => ticket.id === id);
   };
 
-  const createCategory = (categoryData: Omit<Category, 'id'>) => {
-    const newCategory: Category = {
-      ...categoryData,
-      id: (categories.length + 1).toString()
-    };
-    setCategories(prev => [...prev, newCategory]);
+  const createCategory = async (categoryData: Omit<Category, 'id'>) => {
+    await addDoc(collection(db, "categories"), categoryData);
   };
 
-  const updateCategory = (id: string, updates: Partial<Category>) => {
-    setCategories(prev => prev.map(category =>
-      category.id === id ? { ...category, ...updates } : category
-    ));
+  const updateCategory = async (id: string, updates: Partial<Category>) => {
+    await updateDoc(doc(db, "categories", id), updates);
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories(prev => prev.filter(category => category.id !== id));
+  const deleteCategory = async (id: string) => {
+    await deleteDoc(doc(db, "categories", id));
+  };
+
+  const updateUserRole = async (userId: string, role: 'end_user' | 'support_agent' | 'admin') => {
+    await updateDoc(doc(db, "users", userId), {
+      role,
+      updatedAt: new Date()
+    });
+  };
+
+  const assignTicket = async (ticketId: string, agentId: string) => {
+    await updateDoc(doc(db, "tickets", ticketId), {
+      assignedTo: agentId,
+      updatedAt: new Date()
+    });
   };
 
   return (
     <TicketContext.Provider value={{
       tickets,
       categories,
+      users,
       createTicket,
       updateTicket,
       addReply,
@@ -222,7 +243,9 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       getTicketById,
       createCategory,
       updateCategory,
-      deleteCategory
+      deleteCategory,
+      updateUserRole,
+      assignTicket
     }}>
       {children}
     </TicketContext.Provider>

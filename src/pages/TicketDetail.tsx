@@ -4,11 +4,20 @@ import { useAuth } from '@/context/AuthContext';
 import { useTickets } from '@/context/TicketContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card, CardContent, CardDescription,
+  CardHeader, CardTitle
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Send, ArrowUp, ArrowDown, User, Clock, Tag, AlertCircle } from 'lucide-react';
+import {
+  ArrowLeft, Send, ArrowUp, User,
+  Clock, Tag, AlertCircle
+} from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 
@@ -67,10 +76,10 @@ const TicketDetail = () => {
 
   const handleAddReply = async () => {
     if (!replyMessage.trim()) return;
-    
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
-    addReply(ticket.id, replyMessage);
+
+    await addReply(ticket.id, replyMessage);
+
     setReplyMessage('');
     setLoading(false);
     toast({
@@ -79,25 +88,25 @@ const TicketDetail = () => {
     });
   };
 
-  const handleStatusChange = (newStatus: string) => {
-    updateTicket(ticket.id, { status: newStatus as any });
+  const handleStatusChange = async (newStatus: string) => {
+    await updateTicket(ticket.id, { status: newStatus });
     toast({
       title: "Status updated",
       description: `Ticket status changed to ${newStatus.replace('_', ' ')}.`,
     });
   };
 
-  const handleAssignToMe = () => {
-    updateTicket(ticket.id, { assignedTo: user?.uid });
+  const handleAssignToMe = async () => {
+    await updateTicket(ticket.id, { assignedTo: user?.uid });
     toast({
       title: "Ticket assigned",
       description: "Ticket has been assigned to you.",
     });
   };
 
-  const handleVote = () => {
+  const handleVote = async () => {
     if (!user) return;
-    voteTicket(ticket.id, user.uid);
+    await voteTicket(ticket.id, user.uid);
   };
 
   const canManageTicket = user?.role === 'support_agent' || user?.role === 'admin';
@@ -107,7 +116,6 @@ const TicketDetail = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
           <Button variant="ghost" onClick={() => navigate('/dashboard')}>
@@ -118,7 +126,6 @@ const TicketDetail = () => {
       </header>
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* Ticket Header */}
         <Card className="mb-6">
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -143,12 +150,10 @@ const TicketDetail = () => {
                   </div>
                   <div className="flex items-center gap-1">
                     <Clock className="h-4 w-4" />
-                    {ticket.createdAt.toLocaleDateString()}
+                    {new Date(ticket.createdAt).toLocaleDateString()}
                   </div>
                 </div>
               </div>
-              
-              {/* Vote Section */}
               {canVote && (
                 <div className="flex flex-col items-center gap-1">
                   <Button
@@ -160,7 +165,7 @@ const TicketDetail = () => {
                     <ArrowUp className="h-4 w-4" />
                     {hasVoted ? 'Voted' : 'Vote'}
                   </Button>
-                  <span className="text-sm font-medium">{ticket.votes}</span>
+                  <span className="text-sm font-medium">{ticket.votes ?? 0}</span>
                 </div>
               )}
             </div>
@@ -170,7 +175,6 @@ const TicketDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Agent/Admin Controls */}
         {canManageTicket && (
           <Card className="mb-6">
             <CardHeader>
@@ -192,7 +196,6 @@ const TicketDetail = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                
                 {!ticket.assignedTo && (
                   <div className="flex items-end">
                     <Button onClick={handleAssignToMe}>
@@ -200,7 +203,6 @@ const TicketDetail = () => {
                     </Button>
                   </div>
                 )}
-                
                 {ticket.assignedTo && (
                   <div className="flex-1 min-w-48">
                     <label className="text-sm font-medium mb-2 block">Assigned To</label>
@@ -218,18 +220,18 @@ const TicketDetail = () => {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="text-lg">
-              Replies ({ticket.replies.length})
+              Replies ({ticket.replies?.length || 0})
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {ticket.replies.length === 0 ? (
+            {ticket.replies?.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">
                 No replies yet. Be the first to comment!
               </p>
             ) : (
               <div className="space-y-4">
                 {ticket.replies.map((reply, index) => (
-                  <div key={reply.id}>
+                  <div key={reply.id || index}>
                     <div className="flex items-start gap-3">
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                         <User className="h-4 w-4" />
@@ -238,7 +240,7 @@ const TicketDetail = () => {
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-sm">{reply.authorName}</span>
                           <span className="text-xs text-muted-foreground">
-                            {reply.timestamp.toLocaleString()}
+                            {new Date(reply.timestamp).toLocaleString()}
                           </span>
                         </div>
                         <p className="text-sm whitespace-pre-wrap">{reply.message}</p>
@@ -252,7 +254,6 @@ const TicketDetail = () => {
           </CardContent>
         </Card>
 
-        {/* Add Reply */}
         {canReply && (
           <Card>
             <CardHeader>
