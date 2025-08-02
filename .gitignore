@@ -23,3 +23,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.env firebase.ts git add .gitignore git commit -m Add .env to .gitignore
+.env
+.env
