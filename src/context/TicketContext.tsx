@@ -38,14 +38,43 @@ export interface UserProfile {
   name: string;
   email: string;
   role: 'end_user' | 'support_agent' | 'admin';
+  categoryInterest?: string;
+  language?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: 'ticket_reply' | 'ticket_status_change' | 'ticket_assigned' | 'new_ticket' | 'role_upgrade_request';
+  ticketId?: string;
+  read: boolean;
+  createdAt: Date;
+}
+
+export interface RoleUpgradeRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  currentRole: 'end_user';
+  requestedRole: 'support_agent';
+  message?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: Date;
+  processedAt?: Date;
+  processedBy?: string;
 }
 
 interface TicketContextType {
   tickets: Ticket[];
   categories: Category[];
   users: UserProfile[];
+  notifications: Notification[];
+  roleUpgradeRequests: RoleUpgradeRequest[];
   createTicket: (ticket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => Promise<void>;
   updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
   addReply: (ticketId: string, message: string) => Promise<void>;
@@ -56,6 +85,11 @@ interface TicketContextType {
   deleteCategory: (id: string) => Promise<void>;
   updateUserRole: (userId: string, role: 'end_user' | 'support_agent' | 'admin') => Promise<void>;
   assignTicket: (ticketId: string, agentId: string) => Promise<void>;
+  createNotification: (notification: Omit<Notification, 'id' | 'createdAt'>) => Promise<void>;
+  markNotificationAsRead: (notificationId: string) => Promise<void>;
+  createRoleUpgradeRequest: (request: Omit<RoleUpgradeRequest, 'id' | 'createdAt'>) => Promise<void>;
+  processRoleUpgradeRequest: (requestId: string, status: 'approved' | 'rejected', processedBy: string) => Promise<void>;
+  updateUserProfile: (userId: string, updates: Partial<UserProfile>) => Promise<void>;
 }
 
 const TicketContext = createContext<TicketContextType | undefined>(undefined);
@@ -64,6 +98,8 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [roleUpgradeRequests, setRoleUpgradeRequests] = useState<RoleUpgradeRequest[]>([]);
   const { user } = useAuth();
 
   // Listen for tickets
@@ -154,6 +190,69 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => unsub();
   }, [user?.role]);
 
+  // Listen for notifications
+  useEffect(() => {
+    if (!user) return;
+    
+    const unsub = onSnapshot(
+      collection(db, "notifications"), 
+      (snapshot) => {
+        try {
+          const notificationData = snapshot.docs
+            .map(docSnap => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                ...data,
+                createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+              } as Notification;
+            })
+            .filter(notification => notification.userId === user.uid);
+          setNotifications(notificationData);
+        } catch (error) {
+          console.error('Error fetching notifications:', error);
+          setNotifications([]);
+        }
+      },
+      (error) => {
+        console.error('Error listening to notifications:', error);
+        setNotifications([]);
+      }
+    );
+    return () => unsub();
+  }, [user?.uid]);
+
+  // Listen for role upgrade requests (admin only)
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    
+    const unsub = onSnapshot(
+      collection(db, "roleUpgradeRequests"), 
+      (snapshot) => {
+        try {
+          const requestData = snapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+              processedAt: data.processedAt?.toDate ? data.processedAt.toDate() : undefined,
+            } as RoleUpgradeRequest;
+          });
+          setRoleUpgradeRequests(requestData);
+        } catch (error) {
+          console.error('Error fetching role upgrade requests:', error);
+          setRoleUpgradeRequests([]);
+        }
+      },
+      (error) => {
+        console.error('Error listening to role upgrade requests:', error);
+        setRoleUpgradeRequests([]);
+      }
+    );
+    return () => unsub();
+  }, [user?.role]);
+
   const createTicket = async (ticketData: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt' | 'replies' | 'votes' | 'votedBy'>) => {
     await addDoc(collection(db, "tickets"), {
       ...ticketData,
@@ -231,11 +330,48 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   };
 
+  const createNotification = async (notificationData: Omit<Notification, 'id' | 'createdAt'>) => {
+    await addDoc(collection(db, "notifications"), {
+      ...notificationData,
+      createdAt: new Date()
+    });
+  };
+
+  const markNotificationAsRead = async (notificationId: string) => {
+    await updateDoc(doc(db, "notifications", notificationId), {
+      read: true
+    });
+  };
+
+  const createRoleUpgradeRequest = async (requestData: Omit<RoleUpgradeRequest, 'id' | 'createdAt'>) => {
+    await addDoc(collection(db, "roleUpgradeRequests"), {
+      ...requestData,
+      createdAt: new Date()
+    });
+  };
+
+  const processRoleUpgradeRequest = async (requestId: string, status: 'approved' | 'rejected', processedBy: string) => {
+    await updateDoc(doc(db, "roleUpgradeRequests", requestId), {
+      status,
+      processedBy,
+      processedAt: new Date()
+    });
+  };
+
+  const updateUserProfile = async (userId: string, updates: Partial<UserProfile>) => {
+    await updateDoc(doc(db, "users", userId), {
+      ...updates,
+      updatedAt: new Date()
+    });
+  };
+
   return (
     <TicketContext.Provider value={{
       tickets,
       categories,
       users,
+      notifications,
+      roleUpgradeRequests,
       createTicket,
       updateTicket,
       addReply,
@@ -245,7 +381,12 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updateCategory,
       deleteCategory,
       updateUserRole,
-      assignTicket
+      assignTicket,
+      createNotification,
+      markNotificationAsRead,
+      createRoleUpgradeRequest,
+      processRoleUpgradeRequest,
+      updateUserProfile
     }}>
       {children}
     </TicketContext.Provider>

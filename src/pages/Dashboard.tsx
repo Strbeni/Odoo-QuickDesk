@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Plus, MessageSquare, User, LogOut, Settings, ArrowUp, Loader2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { initializeSampleData } from '@/utils/initializeData';
+import NotificationDropdown from '@/components/NotificationDropdown';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -74,12 +76,7 @@ const Dashboard = () => {
       // 'all' shows all tickets for agents/admins
     }
     
-    // Role-based filtering
-    if (user?.role === 'end_user') {
-      return matchesSearch && matchesStatus && matchesCategory && ticket.createdBy === user.uid;
-    }
-    
-    // Agents and admins see all tickets (filtered by assignment if specified)
+    // No role-based filtering needed anymore, all users can see all tickets
     return matchesSearch && matchesStatus && matchesCategory && matchesAssignment;
   });
 
@@ -96,6 +93,12 @@ const Dashboard = () => {
               Welcome, {user?.name}
             </span>
             <Badge variant="secondary">{user?.role.replace('_', ' ')}</Badge>
+            <NotificationDropdown />
+            <ThemeToggle />
+            <Button variant="ghost" size="sm" onClick={() => navigate('/profile')}>
+              <User className="h-4 w-4 mr-2" />
+              Profile
+            </Button>
             {user?.role === 'admin' && (
               <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>
                 <Settings className="h-4 w-4 mr-2" />
